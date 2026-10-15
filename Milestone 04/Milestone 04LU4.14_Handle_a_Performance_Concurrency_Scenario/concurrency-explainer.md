@@ -1,69 +1,13 @@
-# Concurrency Explainer
+# Concurrency & Rate Limiting Technical Report
 
-**Your name:**
-**Date:**
+## 1. Root Cause: Why Check-Then-Insert Fails Under Concurrent Load
+The check-then-insert pattern relies on two sequential database operations: querying existing records (`findFirst`) and inserting a new record (`create`). Under heavy concurrent load, multiple requests execute the check step simultaneously. Because neither request has created a record yet, both checks succeed. Milliseconds later, both requests execute `create()`, resulting in duplicate bookings for the same seat. This gap between reading and writing is a classic race condition that application-level code cannot bridge.
 
----
+## 2. Why Database Unique Constraint Solves the Race Condition
+A composite unique constraint (`@@unique([seatId, showId])`) operates at the database schema level. Relational databases enforce constraints atomically during write transactions. When two concurrent write requests attempt to insert identical `(seatId, showId)` pairs, the database locks the index and allows only the first operation to succeed. The second operation immediately violates the unique constraint and is rejected at the storage layer, making double-booking physically impossible.
 
-## The Root Cause — Why Check-Then-Insert Fails
+## 3. Why Rate Limiting Alone Is Not Sufficient
+Rate limiting restricts the volume of inbound requests per client/IP within a time window (e.g., 10 requests per minute). While this prevents flood attacks and server overloads, it does not prevent race conditions. Two separate, legitimate users submitting booking requests within the same millisecond will both bypass the rate limiter. Without a database unique constraint, both valid requests would still result in double-booking.
 
-<!-- 
-  Explain what a race condition is in the context of this endpoint.
-  Why does checking with findFirst() before creating with create() fail 
-  when two requests arrive at the same millisecond?
-  What is the "gap" between the check and the insert?
-  
-  Minimum: 2 paragraphs
--->
-
-Your explanation here.
-
----
-
-## Why the Unique Constraint Fixes It
-
-<!--
-  Explain why moving the check from application code (findFirst) to the
-  database level (@@unique constraint) actually closes the race condition.
-  
-  Why can't application-layer checking solve this, no matter how fast it runs?
-  What does the database do differently that makes it atomic?
-  
-  Minimum: 1 paragraph
--->
-
-Your explanation here.
-
----
-
-## Why Rate Limiting Alone Is Not Enough
-
-<!--
-  Explain why adding express-rate-limit without the @@unique constraint
-  would still allow double bookings.
-  
-  Give a concrete scenario: two users, one request each, both within the limit.
-  What happens without the constraint?
-  
-  Minimum: 1 paragraph
--->
-
-Your explanation here.
-
----
-
-## What P2002 Means and Why 409
-
-<!--
-  What does Prisma error code P2002 mean?
-  Why is 409 Conflict the correct HTTP status to return when it fires?
-  Why not 400 Bad Request? Why not 500 Internal Server Error?
-  
-  Minimum: 1 paragraph
--->
-
-Your explanation here.
-
----
-
-**Total word count:** (aim for 300–600 words across all four sections)
+## 4. Understanding Prisma Error P2002 and Returning HTTP 409
+When a database unique constraint is violated, Prisma throws a `PrismaClientKnownRequestError` with error code `P2002` (Unique constraint failed). Leaving this unhandled causes the application to crash with a `500 Internal Server Error`. Catching `P2002` explicitly and returning a `409 Conflict` HTTP status code correctly informs the client that the request was valid but rejected because the resource (seat) is already claimed.
