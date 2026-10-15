@@ -5,17 +5,15 @@ const prisma = new PrismaClient();
 
 export const createBooking = async ({ userId, seatId, showId }) => {
   try {
-    // Atomic insert — database unique constraint handles uniqueness
-    const booking = await prisma.booking.create({
+    return await prisma.booking.create({
       data: { userId, seatId, showId }
     });
-    return { status: 201, data: booking };
   } catch (error) {
     if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
-      return { 
-        status: 409, 
-        data: { message: 'Seat already booked for this show' } 
-      };
+      const err = new Error('Seat already booked for this show');
+      err.statusCode = 409;
+      err.code = 'P2002';
+      throw err;
     }
     throw error;
   }
