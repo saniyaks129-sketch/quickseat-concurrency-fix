@@ -1,6 +1,6 @@
 import express from 'express';
 import { bookingLimiter } from '../middleware/rateLimiter.js';
-import { createBooking } from '../services/bookingService.js'; // Ensure path matches exact service filename
+import { createBooking } from '../services/bookings.js';
 
 const router = express.Router();
 
